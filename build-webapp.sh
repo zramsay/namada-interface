@@ -11,15 +11,15 @@ fi
 
 echo "namada interface test"
 
-# from docs, ubuntu setup
+# from docs, ubuntu setup, re-ordered
+apt-get install -y curl
+apt-get install -y clang
+apt-get install -y pkg-config
+apt-get install -y libssl-dev
+apt-get install -y protobuf-compiler
+
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 rustup target add wasm32-unknown-unknown
-sudo apt-get install -y clang
-sudo apt-get install -y pkg-config
-sudo apt-get install -y libssl-dev
-sudo apt-get install -y protobuf-compiler
-sudo apt-get install -y curl
-sudo apt-get install -y npm
 curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
 yarn || exit 1
