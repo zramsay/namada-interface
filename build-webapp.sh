@@ -15,6 +15,7 @@ echo "namada interface test"
 apt-get install -y curl
 
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+source "$HOME/.cargo/env"
 
 apt-get install -y clang
 apt-get install -y pkg-config
