@@ -1,4 +1,5 @@
-import { Asset } from "@chain-registry/types";
+import { SdkEvents } from "@namada/sdk/web";
+import { Namada } from "@namada/types";
 import {
   accountsAtom,
   defaultAccountAtom,
@@ -10,61 +11,148 @@ import {
   tokenAddressesAtom,
 } from "atoms/chain";
 import { shouldUpdateBalanceAtom } from "atoms/etc";
-import { availableAssetsAtom } from "atoms/integrations";
+import { maspIndexerUrlAtom, rpcUrlAtom } from "atoms/settings";
 import { queryDependentFn } from "atoms/utils";
 import BigNumber from "bignumber.js";
+import * as osmosis from "chain-registry/mainnet/osmosis";
 import { atomWithQuery } from "jotai-tanstack-query";
-import { namadaAsset } from "registry/namadaAsset";
+import semver from "semver";
 import { AddressWithAsset } from "types";
 import {
   findAssetByToken,
   mapNamadaAddressesToAssets,
   mapNamadaAssetsToTokenBalances,
 } from "./functions";
-import { fetchCoinPrices, fetchShieldedBalance } from "./services";
+import {
+  fetchCoinPrices,
+  fetchShieldedBalance,
+  shieldedSync,
+  ShieldedSyncEmitter,
+} from "./services";
 
 export type TokenBalance = AddressWithAsset & {
   amount: BigNumber;
   dollar?: BigNumber;
 };
 
-export const viewingKeyAtom = atomWithQuery<string>((get) => {
+const DEPRECATED_getViewingKey = async (): Promise<
+  [string, string[]] | undefined
+> => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const namada: Namada | undefined = (window as any).namada;
+    if (namada && semver.lt(namada.version(), "0.3.3")) {
+      const accounts = await namada.accounts();
+      const defaultAccount = await namada.defaultAccount();
+      const shieldedAccounts = accounts?.filter(
+        (a) => a.type === "shielded-keys"
+      );
+      const defaultShieldedAccount = shieldedAccounts?.find(
+        (a) => a.alias === defaultAccount?.alias
+      );
+      const defaultViewingKey = defaultShieldedAccount?.owner ?? "";
+      const viewingKeys = shieldedAccounts?.map((a) => a.owner ?? "") ?? [];
+
+      return [defaultViewingKey, viewingKeys];
+    }
+  } catch {
+    // do nothing
+  }
+  return undefined;
+};
+
+export const viewingKeysAtom = atomWithQuery<[string, string[]]>((get) => {
   const accountsQuery = get(accountsAtom);
   const defaultAccountQuery = get(defaultAccountAtom);
 
   return {
-    queryKey: ["viewing-key", accountsQuery.data, defaultAccountQuery.data],
+    queryKey: ["viewing-keys", accountsQuery.data, defaultAccountQuery.data],
     ...queryDependentFn(async () => {
-      const shieldedAccount = accountsQuery.data?.find(
-        (a) => a.isShielded && a.alias === defaultAccountQuery.data?.alias
+      const deprecatedViewingKey = await DEPRECATED_getViewingKey();
+      if (deprecatedViewingKey) {
+        return deprecatedViewingKey;
+      }
+      const shieldedAccounts = accountsQuery.data?.filter((a) => a.isShielded);
+      const defaultShieldedAccount = shieldedAccounts?.find(
+        (a) => a.alias === defaultAccountQuery.data?.alias
       );
-      return shieldedAccount?.viewingKey ?? "";
+      const defaultViewingKey = defaultShieldedAccount?.viewingKey ?? "";
+      const viewingKeys =
+        shieldedAccounts?.map((a) => a.viewingKey ?? "") ?? [];
+
+      return [defaultViewingKey, viewingKeys];
     }, [accountsQuery, defaultAccountQuery]),
   };
 });
+
+export const shieldedSyncAtom = atomWithQuery<ShieldedSyncEmitter | null>(
+  (get) => {
+    const viewingKeysQuery = get(viewingKeysAtom);
+    const namTokenAddressQuery = get(nativeTokenAddressAtom);
+    const rpcUrl = get(rpcUrlAtom);
+    const maspIndexerUrl = get(maspIndexerUrlAtom);
+
+    return {
+      queryKey: [
+        "shielded-sync",
+        viewingKeysQuery.data,
+        namTokenAddressQuery.data,
+        rpcUrl,
+        maspIndexerUrl,
+      ],
+      ...queryDependentFn(async () => {
+        const viewingKeys = viewingKeysQuery.data;
+        const namTokenAddress = namTokenAddressQuery.data;
+        if (!namTokenAddress || !viewingKeys) {
+          return null;
+        }
+        const [_, allViewingKeys] = viewingKeys;
+        return shieldedSync(
+          rpcUrl,
+          maspIndexerUrl,
+          namTokenAddress,
+          allViewingKeys
+        );
+      }, [viewingKeysQuery, namTokenAddressQuery]),
+    };
+  }
+);
 
 export const shieldedBalanceAtom = atomWithQuery<
   { address: string; amount: BigNumber }[]
 >((get) => {
   const enablePolling = get(shouldUpdateBalanceAtom);
-  const viewingKeyQuery = get(viewingKeyAtom);
+  const viewingKeysQuery = get(viewingKeysAtom);
   const tokenAddressesQuery = get(tokenAddressesAtom);
   const namTokenAddressQuery = get(nativeTokenAddressAtom);
+  const rpcUrl = get(rpcUrlAtom);
+  const maspIndexerUrl = get(maspIndexerUrlAtom);
+  const shieldedSync = get(shieldedSyncAtom);
 
   return {
     refetchInterval: enablePolling ? 1000 : false,
     queryKey: [
       "shielded-balance",
-      viewingKeyQuery.data,
+      viewingKeysQuery.data,
       tokenAddressesQuery.data,
       namTokenAddressQuery.data,
+      shieldedSync.data,
+      rpcUrl,
+      maspIndexerUrl,
     ],
     ...queryDependentFn(async () => {
-      const viewingKey = viewingKeyQuery.data;
+      const viewingKeys = viewingKeysQuery.data;
       const tokenAddresses = tokenAddressesQuery.data;
-      if (!viewingKey || !tokenAddresses) {
+      const syncEmitter = shieldedSync.data;
+      if (!viewingKeys || !tokenAddresses || !syncEmitter) {
         return [];
       }
+      const [viewingKey] = viewingKeys;
+
+      await new Promise<void>((resolve) => {
+        syncEmitter.once(SdkEvents.ProgressBarFinished, () => resolve());
+      });
+
       const response = await fetchShieldedBalance(
         viewingKey,
         tokenAddresses.map((t) => t.address)
@@ -78,41 +166,15 @@ export const shieldedBalanceAtom = atomWithQuery<
           : new BigNumber(amount),
       }));
       return shieldedBalance;
-    }, [viewingKeyQuery, tokenAddressesQuery, namTokenAddressQuery]),
-  };
-});
-
-export const assetByAddressAtom = atomWithQuery((get) => {
-  const tokenAddressesQuery = get(tokenAddressesAtom);
-  const namTokenAddressQuery = get(nativeTokenAddressAtom);
-  const availableAssets = get(availableAssetsAtom);
-
-  return {
-    queryKey: [
-      "asset-by-address",
-      tokenAddressesQuery.data,
-      namTokenAddressQuery.data,
-    ],
-    queryFn: () => {
-      const assetByAddress: Record<string, Asset> = {};
-      if (namTokenAddressQuery.data) {
-        assetByAddress[namTokenAddressQuery.data] = namadaAsset;
-      }
-      tokenAddressesQuery.data?.forEach((token) => {
-        const asset = findAssetByToken(token, availableAssets);
-        if (asset) {
-          assetByAddress[token.address] = asset;
-        }
-      });
-      return assetByAddress;
-    },
+    }, [viewingKeysQuery, tokenAddressesQuery, namTokenAddressQuery]),
   };
 });
 
 export const tokenPricesAtom = atomWithQuery((get) => {
   const shieldedBalanceQuery = get(shieldedBalanceAtom);
   const transparentBalanceQuery = get(transparentBalanceAtom);
-  const assetByAddressQuery = get(assetByAddressAtom);
+  const namTokenAddressQuery = get(nativeTokenAddressAtom);
+  const tokenAddressesQuery = get(tokenAddressesAtom);
 
   // Get the list of addresses that exists on balances
   const obj: Record<string, true> = {};
@@ -123,32 +185,37 @@ export const tokenPricesAtom = atomWithQuery((get) => {
     obj[address] = true;
   });
   const addresses = Object.keys(obj);
+  const namAddress = namTokenAddressQuery.data;
+  const tokens = tokenAddressesQuery.data;
 
   return {
-    queryKey: ["token-prices", addresses, assetByAddressQuery.data],
+    queryKey: ["token-prices", addresses, tokens, namAddress],
     queryFn: async () => {
-      const addressByBase: Record<string, string> = {};
+      const baseMap: Record<string, string> = {};
       addresses.forEach((address) => {
-        const base = assetByAddressQuery.data?.[address]?.base;
-        if (base) {
-          addressByBase[base] = address;
+        const token = tokens?.find((t) => t.address === address);
+        if (token) {
+          const asset = findAssetByToken(token, osmosis.assets);
+          if (asset) {
+            baseMap[asset.base] = address;
+          }
         }
       });
-      const assetBaseList = Object.keys(addressByBase);
-      const apiResponse =
-        assetBaseList.length ?
-          await fetchCoinPrices(Object.keys(addressByBase))
-        : [];
-      // TODO mock NAM price
-      // apiResponse[namadaAsset.base] = {
-      //   "ibc/498A0751C798A0D9A389AA3691123DADA57DAA4FE165D5C75894505B876BA6E4":
-      //     "1.000000000000000000000000000000000000",
-      // };
+      const baseList = Object.keys(baseMap);
+      const apiResponse = await fetchCoinPrices(baseList);
+
       const tokenPrices: Record<string, BigNumber> = {};
       Object.entries(apiResponse).forEach(([base, value]) => {
-        const address = addressByBase[base];
-        tokenPrices[address] = new BigNumber(Object.values(value)[0]);
+        const address = baseMap[base];
+        const dollar = Object.values(value)[0];
+        if (dollar) {
+          tokenPrices[address] = new BigNumber(dollar);
+        }
       });
+      // TODO mock NAM price while it's not available on api
+      if (namAddress && !tokenPrices[namAddress]) {
+        tokenPrices[namAddress] = new BigNumber(0);
+      }
       return tokenPrices;
     },
   };

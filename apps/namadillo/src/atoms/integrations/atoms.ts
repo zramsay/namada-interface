@@ -1,7 +1,7 @@
 import { AssetList, Chain } from "@chain-registry/types";
 import { ExtensionKey, IbcTransferProps } from "@namada/types";
 import { defaultAccountAtom } from "atoms/accounts";
-import { chainAtom } from "atoms/chain";
+import { chainAtom, chainParametersAtom } from "atoms/chain";
 import { settingsAtom } from "atoms/settings";
 import { queryDependentFn } from "atoms/utils";
 import BigNumber from "bignumber.js";
@@ -9,16 +9,22 @@ import { atom } from "jotai";
 import { atomWithMutation, atomWithQuery } from "jotai-tanstack-query";
 import { atomFamily, atomWithStorage } from "jotai/utils";
 import { TransactionPair } from "lib/query";
+import { createTransferDataFromIbc } from "lib/transactions";
 import {
   AddressWithAsset,
+  AddressWithAssetAndAmountMap,
   ChainId,
   ChainRegistryEntry,
   GasConfig,
+  TransferStep,
+  TransferTransactionData,
 } from "types";
 import {
   createIbcTx,
+  getIbcChannels,
   getKnownChains,
   ibcAddressToDenomTrace,
+  IbcChannels,
   mapCoinsToAssets,
 } from "./functions";
 import {
@@ -61,15 +67,29 @@ export const ibcTransferAtom = atomWithMutation(() => {
     mutationFn: async ({
       transferParams,
       chain,
-    }: IBCTransferAtomParams): Promise<void> => {
-      await queryAndStoreRpc(chain, submitIbcTransfer(transferParams));
+    }: IBCTransferAtomParams): Promise<TransferTransactionData> => {
+      return await queryAndStoreRpc(chain, async (rpc: string) => {
+        const txResponse = await submitIbcTransfer(rpc, transferParams);
+        return createTransferDataFromIbc(
+          txResponse,
+          rpc,
+          transferParams.asset.asset,
+          transferParams.chainId,
+          transferParams.isShielded ?
+            { type: "IbcToShielded", currentStep: TransferStep.ZkProof }
+          : {
+              type: "IbcToTransparent",
+              currentStep: TransferStep.IbcToTransparent,
+            }
+        );
+      });
     },
   };
 });
 
 export const assetBalanceAtomFamily = atomFamily(
   ({ chain, walletAddress, assets }: AssetBalanceAtomParams) => {
-    return atomWithQuery(() => ({
+    return atomWithQuery<AddressWithAssetAndAmountMap>(() => ({
       queryKey: ["assets", walletAddress, chain?.chain_id, assets],
       ...queryDependentFn(async () => {
         return await queryAndStoreRpc(chain!, async (rpc: string) => {
@@ -117,6 +137,23 @@ export const availableAssetsAtom = atom((get) => {
   const settings = get(settingsAtom);
   return getKnownChains(settings.enableTestnets).map(({ assets }) => assets);
 });
+
+export const ibcChannelsFamily = atomFamily((cosmosChainName?: string) =>
+  atomWithQuery<IbcChannels | undefined>((get) => {
+    const chainParameters = get(chainParametersAtom);
+
+    return {
+      queryKey: ["ibc-channel", cosmosChainName, chainParameters.data!.chainId],
+      ...queryDependentFn(
+        () =>
+          Promise.resolve(
+            getIbcChannels(chainParameters.data!.chainId, cosmosChainName!)
+          ),
+        [typeof cosmosChainName !== "undefined", chainParameters]
+      ),
+    };
+  })
+);
 
 type CreateIbcTxArgs = {
   destinationAddress: string;

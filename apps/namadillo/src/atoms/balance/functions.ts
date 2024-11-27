@@ -3,32 +3,28 @@ import { IbcToken, NativeToken } from "@namada/indexer-client";
 import { mapCoinsToAssets } from "atoms/integrations";
 import BigNumber from "bignumber.js";
 import { DenomTrace } from "cosmjs-types/ibc/applications/transfer/v1/transfer";
-import { namadaAsset } from "registry/namadaAsset";
 import { AddressWithAssetAndAmountMap } from "types";
+import { isNamadaAsset } from "utils";
 import { TokenBalance } from "./atoms";
 
 // TODO upgrade this function to be as smart as possible
 // please refer to `tryCoinToIbcAsset` and how we could combine both
 export const findAssetByToken = (
   token: NativeToken | IbcToken,
-  chains: AssetList[]
+  assetList: AssetList
 ): Asset | undefined => {
   if ("trace" in token) {
-    for (let i = 0; i < chains.length; i++) {
-      for (let j = 0; j < chains[i].assets.length; j++) {
-        const asset = chains[i].assets[j];
-        if (asset.traces) {
-          for (let k = 0; k < asset.traces.length; k++) {
-            const trace = asset.traces[k];
-            if (
-              "chain" in trace &&
-              trace.chain &&
-              "path" in trace.chain &&
-              trace.chain.path === token.trace
-            ) {
-              return asset;
-            }
-          }
+    const traceDenom = token.trace.split("/").at(-1);
+    if (traceDenom) {
+      for (let i = 0; i < assetList.assets.length; i++) {
+        const asset = assetList.assets[i];
+        if (
+          asset.base === traceDenom ||
+          asset.denom_units.find(
+            (u) => u.denom === traceDenom || u.aliases?.includes(traceDenom)
+          )
+        ) {
+          return asset;
         }
       }
     }
@@ -57,8 +53,7 @@ export const getTotalDollar = (list?: TokenBalance[]): BigNumber | undefined =>
   sumDollars(list ?? []);
 
 export const getTotalNam = (list?: TokenBalance[]): BigNumber =>
-  list?.find((i) => i.asset.base === namadaAsset.base)?.amount ??
-  new BigNumber(0);
+  list?.find((i) => isNamadaAsset(i.asset))?.amount ?? new BigNumber(0);
 
 const tnamAddressToDenomTrace = (
   address: string,

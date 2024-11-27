@@ -14,8 +14,8 @@ import { getTotalDollar } from "atoms/balance/functions";
 import { getAssetImageUrl } from "integrations/utils";
 import { useAtomValue } from "jotai";
 import { useEffect, useState } from "react";
-import { namadaAsset } from "registry/namadaAsset";
 import { twMerge } from "tailwind-merge";
+import { isNamadaAsset } from "utils";
 
 const resultsPerPage = 100;
 const initialPage = 0;
@@ -54,7 +54,7 @@ const TransparentTokensTable = ({
           key={`balance-${originalAddress}`}
           className="flex flex-col text-right leading-tight"
         >
-          <TokenCurrency asset={asset} amount={amount} />
+          <TokenCurrency symbol={asset.symbol} amount={amount} />
           {dollar && (
             <FiatCurrency
               className="text-neutral-600 text-sm"
@@ -72,7 +72,7 @@ const TransparentTokensTable = ({
           >
             Shield
           </ActionButton>
-          {originalAddress === namadaAsset.address && (
+          {isNamadaAsset(asset) && (
             <ActionButton
               size="xs"
               className="w-fit mx-auto"
@@ -127,7 +127,7 @@ const TransparentTokensTable = ({
 };
 
 const PanelContent = ({ data }: { data: TokenBalance[] }): JSX.Element => {
-  const namBalance = data.find((i) => i.asset.base === namadaAsset.base);
+  const namBalance = data.find((i) => isNamadaAsset(i.asset));
 
   return (
     <div className="flex flex-col gap-2">
@@ -137,8 +137,8 @@ const PanelContent = ({ data }: { data: TokenBalance[] }): JSX.Element => {
             title: "Total Transparent Asset Balance",
             amount: getTotalDollar(data),
             button: (
-              <ActionButton size="xs" href={routes.ibcShieldAll}>
-                Shield All
+              <ActionButton size="xs" href={routes.maspShield}>
+                Shield
               </ActionButton>
             ),
           },
@@ -168,7 +168,7 @@ const PanelContent = ({ data }: { data: TokenBalance[] }): JSX.Element => {
               {namAmount && namBalance && (
                 <TokenCurrency
                   amount={namAmount}
-                  asset={namBalance.asset}
+                  symbol={namBalance.asset.symbol}
                   className="text-neutral-400 text-sm"
                 />
               )}

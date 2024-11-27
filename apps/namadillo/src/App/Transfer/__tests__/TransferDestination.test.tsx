@@ -9,11 +9,11 @@ import {
 } from "App/Transfer/__mocks__/chains";
 import { TransferDestination } from "App/Transfer/TransferDestination";
 import BigNumber from "bignumber.js";
-import { namadaAsset } from "registry/namadaAsset";
+import { namadaAsset } from "utils";
 import { walletMock } from "../__mocks__/providers";
 import { parseChainInfo } from "../common";
 
-describe("TransferDestination", () => {
+describe("Component: TransferDestination", () => {
   it("should render the component with the default props", () => {
     render(<TransferDestination />);
     expect(screen.getByText(/select chain/i)).toBeInTheDocument();

@@ -1,7 +1,7 @@
 import { Chain } from "@chain-registry/types";
 import { Window as KeplrWindow } from "@keplr-wallet/types";
 import { mapUndefined } from "@namada/utils";
-import { TransactionTimeline } from "App/Common/TransactionTimeline";
+import { TransferTransactionTimeline } from "App/Transactions/TransferTransactionTimeline";
 import {
   OnSubmitTransferParams,
   TransferModule,
@@ -11,21 +11,21 @@ import {
   assetBalanceAtomFamily,
   availableChainsAtom,
   chainRegistryAtom,
+  ibcChannelsFamily,
   ibcTransferAtom,
 } from "atoms/integrations";
+import BigNumber from "bignumber.js";
 import clsx from "clsx";
-import { AnimatePresence, motion } from "framer-motion";
+import { useTransactionActions } from "hooks/useTransactionActions";
 import { useWalletManager } from "hooks/useWalletManager";
 import { wallets } from "integrations";
 import { KeplrWalletManager } from "integrations/Keplr";
+import { getTransactionFee } from "integrations/utils";
 import { useAtomValue } from "jotai";
 import { useEffect, useMemo, useState } from "react";
 import namadaChain from "registry/namada.json";
-import { Address } from "types";
+import { Address, PartialTransferTransactionData, TransferStep } from "types";
 import { IbcTopHeader } from "./IbcTopHeader";
-
-import * as cosmos from "chain-registry/mainnet/cosmoshub";
-import { getTransactionFee } from "integrations/utils";
 
 const keplr = new KeplrWalletManager();
 const defaultChainId = "cosmoshub-4";
@@ -35,8 +35,11 @@ export const IbcTransfer: React.FC = () => {
   const availableChains = useAtomValue(availableChainsAtom);
   const [shielded, setShielded] = useState<boolean>(true);
   const [selectedAssetAddress, setSelectedAssetAddress] = useState<Address>();
-  const [currentStep, setCurrentStep] = useState(0);
+  const [amount, setAmount] = useState<BigNumber | undefined>();
   const [generalErrorMessage, setGeneralErrorMessage] = useState("");
+  const [sourceChannel, setSourceChannel] = useState("");
+  const [destinationChannel, setDestinationChannel] = useState("");
+
   const performIbcTransfer = useAtomValue(ibcTransferAtom);
   const defaultAccounts = useAtomValue(allDefaultAccountsAtom);
   const {
@@ -45,6 +48,15 @@ export const IbcTransfer: React.FC = () => {
     connectToChainId,
     chainId,
   } = useWalletManager(keplr);
+
+  const [transaction, setTransaction] =
+    useState<PartialTransferTransactionData>();
+
+  const {
+    transactions: myTransactions,
+    findByHash,
+    storeTransaction,
+  } = useTransactionActions();
 
   const { data: availableAssets, isLoading: isLoadingBalances } = useAtomValue(
     assetBalanceAtomFamily({
@@ -69,6 +81,15 @@ export const IbcTransfer: React.FC = () => {
     setSelectedAssetAddress(undefined);
   }, [registry]);
 
+  useEffect(() => {
+    if (transaction?.hash) {
+      const tx = findByHash(transaction.hash);
+      if (tx) {
+        setTransaction(tx);
+      }
+    }
+  }, [myTransactions]);
+
   const namadaAddress = useMemo(() => {
     return (
       defaultAccounts.data?.find((account) => account.isShielded === shielded)
@@ -76,14 +97,21 @@ export const IbcTransfer: React.FC = () => {
     );
   }, [defaultAccounts, shielded]);
 
+  const { data: ibcChannels } = useAtomValue(
+    ibcChannelsFamily(registry?.chain.chain_name)
+  );
+
+  useEffect(() => {
+    setSourceChannel(ibcChannels?.cosmosChannelId || "");
+    setDestinationChannel(ibcChannels?.namadaChannelId || "");
+  }, [ibcChannels]);
+
   const onSubmitTransfer = async ({
     amount,
     destinationAddress,
-    ibcOptions,
   }: OnSubmitTransferParams): Promise<void> => {
     try {
       setGeneralErrorMessage("");
-      setCurrentStep(1);
 
       if (typeof sourceAddress === "undefined") {
         throw new Error("Source address is not defined");
@@ -106,11 +134,11 @@ export const IbcTransfer: React.FC = () => {
         throw new Error("Invalid chain");
       }
 
-      if (!ibcOptions?.sourceChannel) {
+      if (!sourceChannel) {
         throw new Error("Invalid IBC source channel");
       }
 
-      if (shielded && !ibcOptions.destinationChannel) {
+      if (shielded && !destinationChannel) {
         throw new Error("Invalid IBC destination channel");
       }
 
@@ -133,40 +161,53 @@ export const IbcTransfer: React.FC = () => {
       };
 
       try {
-        await performIbcTransfer.mutateAsync({
+        setTransaction({
+          type: shielded ? "IbcToShielded" : "IbcToTransparent",
+          asset: selectedAsset.asset,
+          chainId,
+          currentStep: TransferStep.Sign,
+        });
+
+        const tx = await performIbcTransfer.mutateAsync({
           chain: registry.chain,
           transferParams: {
-            signer: keplr.getSigner(chainId),
+            signer: await keplr.getSigner(chainId),
+            chainId,
             sourceAddress,
             destinationAddress,
             amount,
             asset: selectedAsset,
             transactionFee,
-            sourceChannelId: ibcOptions.sourceChannel,
+            sourceChannelId: sourceChannel.trim(),
             ...(shielded ?
               {
                 isShielded: true,
-                destinationChannelId: ibcOptions.destinationChannel,
+                destinationChannelId: destinationChannel.trim(),
               }
             : {
                 isShielded: false,
               }),
           },
         });
+        setTransaction(tx);
+        storeTransaction(tx);
       } finally {
         // Restore Keplr options to avoid mutating state
         baseKeplr.defaultOptions = savedKeplrOptions;
       }
-
-      setCurrentStep(2);
     } catch (err) {
       setGeneralErrorMessage(err + "");
-      setCurrentStep(0);
+      setTransaction(undefined);
     }
   };
 
   const onChangeWallet = (): void => {
-    connectToChainId(chainId || defaultChainId);
+    if (chainId && chainId in chainRegistry) {
+      connectToChainId(chainId);
+      return;
+    }
+
+    connectToChainId(defaultChainId);
   };
 
   const onChangeChain = (chain: Chain): void => {
@@ -175,17 +216,13 @@ export const IbcTransfer: React.FC = () => {
 
   return (
     <>
-      <header className="flex flex-col items-center text-center mb-3 gap-6">
-        <IbcTopHeader type="ibcToNam" isShielded={shielded} />
-        <h2 className="text-lg">IBC Transfer to Namada</h2>
-      </header>
-      <AnimatePresence>
-        {currentStep === 0 && (
-          <motion.div
-            key="transfer"
-            exit={{ opacity: 0 }}
-            className="min-h-[600px]"
-          >
+      <div className="relative min-h-[600px]">
+        {!transaction && (
+          <>
+            <header className="flex flex-col items-center text-center mb-3 gap-6">
+              <IbcTopHeader type="ibcToNam" isShielded={shielded} />
+              <h2 className="text-lg">IBC Transfer to Namada</h2>
+            </header>
             <TransferModule
               source={{
                 isLoadingAssets: isLoadingBalances,
@@ -194,12 +231,14 @@ export const IbcTransfer: React.FC = () => {
                 availableAmount,
                 availableChains,
                 onChangeChain,
-                chain: mapUndefined((id) => chainRegistry[id].chain, chainId),
+                chain: mapUndefined((id) => chainRegistry[id]?.chain, chainId),
                 availableWallets: [wallets.keplr!],
                 wallet: wallets.keplr,
                 walletAddress: sourceAddress,
                 onChangeWallet,
                 onChangeSelectedAsset: setSelectedAssetAddress,
+                amount,
+                onChangeAmount: setAmount,
               }}
               destination={{
                 chain: namadaChain as Chain,
@@ -212,45 +251,30 @@ export const IbcTransfer: React.FC = () => {
               transactionFee={transactionFee}
               isSubmitting={performIbcTransfer.isPending}
               isIbcTransfer={true}
+              ibcOptions={{
+                sourceChannel,
+                onChangeSourceChannel: setSourceChannel,
+                destinationChannel,
+                onChangeDestinationChannel: setDestinationChannel,
+              }}
               errorMessage={generalErrorMessage}
               onSubmitTransfer={onSubmitTransfer}
             />
-          </motion.div>
+          </>
         )}
-        {currentStep > 0 && (
-          <motion.div
-            key="progress"
-            className={clsx("my-12", { "text-yellow": shielded })}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
+        {transaction && (
+          <div
+            className={clsx(
+              "absolute z-50 py-12 left-0 top-0 w-full h-full bg-black",
+              {
+                "text-yellow": shielded,
+              }
+            )}
           >
-            <TransactionTimeline
-              currentStepIndex={currentStep}
-              steps={[
-                {
-                  children: (
-                    <img src={cosmos.chain.logo_URIs?.svg} className="w-14" />
-                  ),
-                },
-                { children: "Signature Required", bullet: true },
-                { children: "IBC Transfer to Namada", bullet: true },
-                {
-                  children: (
-                    <>
-                      <img
-                        src={cosmos.chain.logo_URIs?.svg}
-                        className="w-14 mb-2"
-                      />
-                      Unshielded Transfer Complete
-                    </>
-                  ),
-                },
-              ]}
-            />
-          </motion.div>
+            <TransferTransactionTimeline transaction={transaction} />
+          </div>
         )}
-      </AnimatePresence>
+      </div>
     </>
   );
 };
