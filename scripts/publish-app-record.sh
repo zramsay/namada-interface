@@ -41,6 +41,7 @@ record:
   homepage: "$rcd_homepage"
   license: "$rcd_license"
   author: "$rcd_author"
+  app_type: webapp
   repository:
     - "https://github.com/zramsay/namada-interface"
   repository_ref: "$CERC_REPO_REF"
