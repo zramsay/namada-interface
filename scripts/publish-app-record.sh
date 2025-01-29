@@ -42,7 +42,7 @@ record:
   license: "$rcd_license"
   author: "$rcd_author"
   repository:
-    - "$rcd_repository"
+    - "https://github.com/zramsay/namada-interface"
   repository_ref: "$CERC_REPO_REF"
   app_version: "$rcd_app_version"
 EOF

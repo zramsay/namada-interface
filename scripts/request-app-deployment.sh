@@ -24,7 +24,7 @@ if [ -z "$CERC_REGISTRY_APP_LRN" ]; then
   CERC_REGISTRY_APP_LRN="lrn://$authority/applications/$app"
 fi
 
-i# Get payment address for deployer
+# Get payment address for deployer
 paymentAddress=$(laconic -c $CONFIG_FILE registry name resolve "$DEPLOYER_LRN" | jq -r '.[0].attributes.paymentAddress')
 paymentAmount=$(laconic -c $CONFIG_FILE registry name resolve "$DEPLOYER_LRN" | jq -r '.[0].attributes.minimumPayment' | sed 's/alnt//g')
 # Pay deployer if paymentAmount is not null
