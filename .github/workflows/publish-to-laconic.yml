@@ -17,7 +17,7 @@ env:
   DEPLOYER_LRN: "lrn://vaasl-provider/deployers/webapp-deployer-api.apps.vaasl.io"
 
 jobs:
-  cns_publish:
+  laconic_publish:
     runs-on: ubuntu-latest
     steps:
       - name: "Clone project repository"

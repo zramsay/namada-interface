@@ -19,7 +19,7 @@ services:
 EOF
 
 if [ -z "$CERC_REGISTRY_APP_LRN" ]; then
-  authority=$(echo "$rcd_name" | cut -d'/' -f1 | sed 's/@//')
+  authority="vaasl"
   app=$(echo "$rcd_name" | cut -d'/' -f2-)
   CERC_REGISTRY_APP_LRN="lrn://$authority/applications/$app"
 fi
@@ -47,7 +47,7 @@ record:
   name: "$rcd_name@$rcd_app_version"
   application: "$CERC_REGISTRY_APP_LRN@$rcd_app_version"
   deployer: $DEPLOYER_LRN
-  dns: $CERC_REGISTRY_DEPLOYMENT_HOSTNAME"
+  dns: "$CERC_REGISTRY_DEPLOYMENT_HOSTNAME"
   config:
     env:
       LACONIC_HOSTED_CONFIG_laconicd_chain_id: laconic-testnet-2
