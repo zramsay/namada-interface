@@ -33,7 +33,7 @@ jobs:
           npm config set @cerc-io:registry https://git.vdb.to/api/packages/cerc-io/npm/
           npm install -g @cerc-io/laconic-registry-cli          
       - name: "Install jq"
-        run: apt -y update && apt -y install jq
+        run: sudo apt -y update && sudo apt -y install jq
       - name: "Publish Application Record"
         run: scripts/publish-app-record.sh
       - name: "Request Deployment"
