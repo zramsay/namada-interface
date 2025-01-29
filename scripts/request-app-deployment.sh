@@ -29,7 +29,7 @@ paymentAddress=$(laconic -c $CONFIG_FILE registry name resolve "$DEPLOYER_LRN" |
 paymentAmount=$(laconic -c $CONFIG_FILE registry name resolve "$DEPLOYER_LRN" | jq -r '.[0].attributes.minimumPayment' | sed 's/alnt//g')
 # Pay deployer if paymentAmount is not null
 if [[ -n "$paymentAmount" && "$paymentAmount" != "null" ]]; then
-  payment=$(laconic -c $CONFIG_FILE registry tokens send --address "$paymentAddress" --type alnt --quantity "$paymentAmount")
+  payment=$(laconic -c $CONFIG_FILE registry tokens send --address "$paymentAddress" --type alnt --quantity "$paymentAmount" --user-key "$CERC_REGISTRY_USER_KEY" --bond-id "$CERC_REGISTRY_BOND_ID")
 
   # Extract the transaction hash
   txHash=$(echo "$payment" | jq -r '.tx.hash')
