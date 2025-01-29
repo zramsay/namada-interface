@@ -5,7 +5,6 @@ set -e
 RECORD_FILE=tmp.rf.$$
 CONFIG_FILE=`mktemp`
 
-CERC_APP_TYPE=${CERC_APP_TYPE:-"webapp/next"}
 CERC_REPO_REF=${CERC_REPO_REF:-${GITHUB_SHA:-`git log -1 --format="%H"`}}
 CERC_IS_LATEST_RELEASE=${CERC_IS_LATEST_RELEASE:-"true"}
 
@@ -46,7 +45,6 @@ record:
     - "$rcd_repository"
   repository_ref: "$CERC_REPO_REF"
   app_version: "$rcd_app_version"
-  app_type: "$CERC_APP_TYPE"
 EOF
 
 
@@ -55,7 +53,7 @@ RECORD_ID=$(laconic -c $CONFIG_FILE registry record publish --filename $RECORD_F
 echo $RECORD_ID
 
 if [ -z "$CERC_REGISTRY_APP_LRN" ]; then
-  authority=$(echo "$rcd_name" | cut -d'/' -f1 | sed 's/@//')
+  authority="vaasl"
   app=$(echo "$rcd_name" | cut -d'/' -f2-)
   CERC_REGISTRY_APP_LRN="lrn://$authority/applications/$app"
 fi
